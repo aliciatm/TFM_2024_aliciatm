@@ -1,0 +1,467 @@
+---
+title: "Ownership Database"
+output: html_document
+date: "2024-05-30"
+---
+
+In this notebook I create a "propiedad" (ownership) database with the data of only tenure regimes of each municipality to make it easier to get this data. "Ownership" includes both ownership by purchase and by inheritance. I also create a "target21" and "target11" database which includes all the individuals in the target population.
+
+This takes long to run, specially loading the Census Microdata. The databases are uploaded on GitHub, so it's not needed to run everything to examine them.
+
+# Packages
+
+```{r}
+library(tidyverse)
+library(ggpubr)
+library(ggplot2)
+library(patchwork)
+library(readxl)
+library(haven)
+library(flextable)
+library(openxlsx)
+
+library(extrafont)
+
+# Importar fuentes del sistema operativo
+#font_import(prompt = FALSE)
+
+# Cargar fuentes
+loadfonts(device = "win")
+
+```
+
+# Creating "Onwnership" database
+
+### Create cusec and add names
+
+```{r}
+
+# Microdata 2011
+microdatos2011 <- read_sav("Microdatos2011/Personas/poblacion_2011_v2.sav")
+
+propiedad <- microdatos2011 |> 
+  select(CPRO, CMUN)
+
+# Create cusec codes of rural municipalities and add names
+cusec_991 <- sprintf("%05d", seq(1991, 52991, by = 1000))
+cusec_992 <- sprintf("%05d", seq(1992, 52992, by = 1000))
+cusec_993 <- sprintf("%05d", seq(1993, 52993, by = 1000))
+cusec_994 <- sprintf("%05d", seq(1994, 52994, by = 1000))
+cusec <- c(cusec_991, cusec_992, cusec_993, cusec_994)
+
+MUN_LITERAL <- 
+  ifelse(substr(cusec, 4, 5) == "91","<=2000",
+  ifelse(substr(cusec, 4, 5) == "92", "2001 <= 5000",
+  ifelse(substr(cusec, 4, 5) == "93", "5001 <= 10000",
+  ifelse(substr(cusec, 4, 5) == "94", "10001 <= 20000","Otros"))))
+
+df_rural <- data.frame(MUN_LITERAL, cusec)
+
+# Get the names of all municipalities and provinces
+locations <- read_excel("vivienda turística/exp_viv_turistica_tabla5_FEB2021.xlsx", sheet = 3, na = "Dato protegido por secreto estadístico.")
+
+nombres_municipios <- locations |> 
+  select(MUN_LITERAL, MUN) |> 
+  rename(cusec = MUN) |> 
+  distinct(cusec, .keep_all = TRUE)
+
+nombres_provincias <- locations |> 
+  select(PROV_LITERAL, PROV) |> 
+  rename(CPRO = PROV) |> 
+  distinct(CPRO, .keep_all = TRUE)
+
+nombres_municipios <- rbind(nombres_municipios, df_rural)
+
+# Create names CCAA
+ccaas <- data.frame(
+  CodigoProvincia = c("01", "02", "03", "04", "33", "05", "06", "08", "09", "10", "11", "39", "12", "13", "14", "16", "17", "18", "19", "20", "21", "22", "23", "07", "24", "15", "35", "25", "26", "27", "28", "29", "30", "31", "32", "34", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45", "46", "47", "48", "49", "50", "51", "52"),
+  CCAA = c("País Vasco", "Castilla-La Mancha", "Comunidad Valenciana", "Andalucía", "Asturias", "Castilla y León", "Extremadura", "Cataluña", "Castilla y León", "Extremadura", "Andalucía", "Cantabria", "Comunidad Valenciana", "Castilla-La Mancha", "Andalucía", "Castilla-La Mancha", "Cataluña", "Andalucía", "Castilla-La Mancha", "País Vasco", "Andalucía", "Aragón", "Andalucía", "Islas Baleares", "Castilla y León", "Galicia", "Canarias", "Cataluña", "La Rioja", "Galicia", "Comunidad de Madrid", "Andalucía", "Comunidad de Murcia", "Comunidad Foral de Navarra", "Galicia", "Castilla y León", "Galicia", "Castilla y León", "Canarias", "Cantabria", "Castilla y León", "Andalucía", "Castilla y León", "Cataluña", "Aragón", "Castilla-La Mancha", "Comunidad Valenciana", "Castilla y León", "País Vasco", "Castilla y León", "Aragón", "Ceuta", "Melilla"))
+
+# Add municipality and province names to each cusec
+propiedad <- propiedad |> 
+  mutate(
+    CMUN = str_pad(CMUN, width = 3, side = "left", pad = "0"),
+    CPRO = str_pad(CPRO, width = 2, side = "left", pad = "0")) |> 
+   mutate(  
+    CPRO = trimws(CPRO),
+    CMUN = trimws(CMUN),
+    cusec = paste0(CPRO, CMUN)) |> 
+  left_join(nombres_municipios, by = "cusec") |> 
+  left_join(nombres_provincias, by = "CPRO") |> 
+  left_join(ccaas, by = c("CPRO" = "CodigoProvincia")) |> 
+  distinct(cusec, .keep_all = T)
+
+```
+
+### Rural municipalities
+
+Aquí se solucionan unas pequeñas discrepancias entre los municipios del Censo del 2011 y 2021. Se deben a que los municipios en 2011 entre 10000 a 20000 habitantes están agrupados dentro del código "994", pero en 2021 éstos tienen su nombre completo. Además, algunos municipios se encuentran en el límite de haber pasado una de las barreras de estos códigos entre ambos años y provoca algunos pequeños desajustes.
+
+Datos de población: Padrón municipal e INE. <https://www.ine.es/dynt3/inebase/es/index.htm?padre=525>
+
+```{r}
+
+# Load data 2021
+load("Microdatos2021/Personas/R/CensoPersonas_2021.RData")
+
+microdatos2021 <- Microdatos
+
+# Get all 2021 municipalities
+mun21 <- microdatos2021 |> 
+  select(CPRO, CMUN) |>    
+  mutate(CPRO = trimws(CPRO), CMUN = trimws(CMUN), cusec = paste0(CPRO, CMUN)) |> 
+  distinct(cusec)
+
+# Get all 2011 municipalities
+mun11 <- microdatos2011 |> 
+  select(CPRO, CMUN) |> 
+   mutate(
+    CMUN = str_pad(CMUN, width = 3, side = "left", pad = "0"),
+    CPRO = str_pad(CPRO, width = 2, side = "left", pad = "0")) |>
+   mutate(CPRO = trimws(CPRO), CMUN = trimws(CMUN), cusec = paste0(CPRO, CMUN)) |> 
+  distinct(cusec)
+
+# These are the municipalities lost from 2021 to 2011. 
+# Municipalities from 10000 to 20000 inhabitants
+municipios994 <- mun21 |> 
+  anti_join(mun11, by = "cusec") |> 
+  mutate(cusec_994 = cusec)
+
+mun_994 <- municipios994 |> 
+  mutate(cusec = paste0(substr(cusec, 1, 2), "994")) 
+
+# Add code to municipalities according to population 2011
+poblacion_mun11 <- read_xls("Población/pobmun11.xls")
+
+poblacion_mun11 <- poblacion_mun11 |> 
+  setNames(poblacion_mun11[1, ]) |> 
+      slice(-1) |> 
+    select(-c(MUJERES, VARONES)) |> 
+  rename(Poblacion2011 = `AMBOS SEXOS`) |> 
+    mutate(CPRO = trimws(CPRO), CMUN = trimws(CMUN), cusec = paste0(CPRO, CMUN)) 
+
+cusec_rural_2011 <- poblacion_mun11 |> 
+  mutate(Poblacion2011 = as.numeric(Poblacion2011)) |> 
+  filter(Poblacion2011 < 20000) |> 
+  mutate(cusec_original = cusec,
+    cusec = case_when(
+      Poblacion2011 < 2000 ~ paste0(substr(cusec_original, 1, 2), "991"),
+      Poblacion2011 < 5000 ~ paste0(substr(cusec_original, 1, 2), "992"),
+      Poblacion2011 < 10000 ~ paste0(substr(cusec_original, 1, 2), "993"),
+      Poblacion2011 < 20000 ~ paste0(substr(cusec_original, 1, 2), "994"),
+      TRUE ~ cusec
+    )
+  )
+
+cusec_rural_2011 <- cusec_rural_2011 |> 
+  distinct(cusec_original, .keep_all = TRUE) |> 
+  select(cusec_original, cusec)
+
+
+# Assign code to municipalities according to population 2021
+poblacion_mun21 <- read_xlsx("Población/pobmun21.xlsx")
+
+poblacion_mun21 <- poblacion_mun21 |> 
+  setNames(poblacion_mun21[1, ]) |> 
+      slice(-1) |> 
+    select(-c(MUJERES, HOMBRES)) |> 
+  rename(Poblacion2021 = `POB21`) |> 
+    mutate(CPRO = trimws(CPRO), CMUN = trimws(CMUN), cusec = paste0(CPRO, CMUN)) 
+
+cusec_rural_2021 <- poblacion_mun21 |> 
+  mutate(Poblacion2021 = as.numeric(Poblacion2021)) |> 
+  filter(Poblacion2021 < 20000) |> 
+  mutate(cusec_original = cusec,
+    cusec = case_when(
+      Poblacion2021 < 2000 ~ paste0(substr(cusec_original, 1, 2), "991"),
+      Poblacion2021 < 5000 ~ paste0(substr(cusec_original, 1, 2), "992"),
+      Poblacion2021 < 10000 ~ paste0(substr(cusec_original, 1, 2), "993"),
+      Poblacion2021 < 20000 ~ paste0(substr(cusec_original, 1, 2), "994"),
+      TRUE ~ cusec
+    )
+  )
+
+cusec_rural_2021 <- cusec_rural_2021 |> 
+  distinct(cusec_original, .keep_all = TRUE) |> 
+  select(cusec_original, cusec)
+
+```
+
+## Filtrar población objetivo
+
+### 2011
+
+```{r}
+
+# Select variables 2011
+compra11 <- microdatos2011 |> 
+  select(CPRO, CMUN, EDAD, ANAC, NORDEN, ANORES, TENEN, OPA_NORDEN, TIPOPER, ESTHOG, EDADPAD, EDADMAD) 
+
+# Filter target population
+compra11 <- compra11 |> 
+  filter(EDAD %in% c(18:35), # Young people
+         TIPOPER != "H", # That aren't "child" in household
+         is.na(EDADPAD), # Don't live with father
+         is.na(EDADMAD)) |> # Don't live with mother 
+    select(-EDADPAD, -EDADMAD) |> 
+  filter(ESTHOG %in% c(01, 02, 05, 07, 08, 10, 11)) # Isn't a home with a only person over 65+ or children over 25
+
+compra11 <- compra11 |> 
+  mutate(mayor = ifelse(ANORES - ANAC > 18, TRUE, FALSE)) |> 
+  filter(mayor == TRUE) # Of legal age when last moved
+  
+compra11 <- compra11 |> 
+  filter(NORDEN %in% c(1, 2)) # Order 1 or 2 in household
+
+# Recode tenure regime
+compra11 <- compra11 |>  
+  mutate(
+    TENEN_r = case_when(
+      TENEN == 1 ~ "Propiedad por compra, pagada",
+      TENEN == 2 ~ "Propiedad por compra, pagos pendientes",
+      TENEN == 3 ~ "Propiedad por herencia o donación",
+      TENEN == 4 ~ "Alquiler",
+      TENEN == 5 ~ "Cedida o a bajo precio",
+      TENEN == 6 ~ "Otro")) |> 
+  mutate(
+    TENEN_VIV = case_when(
+      TENEN_r %in% c("Propiedad por compra, pagada", "Propiedad por compra, pagos pendientes") ~ "Compra",
+      TENEN_r == "Propiedad por herencia o donación" ~ "Herencia o donación",
+      TENEN_r == "Alquiler" ~ "Alquiler",
+      TENEN_r %in% c("Cedida o a bajo precio", "Otro") ~ "Otro"))
+
+# Add cusec
+compra11 <- compra11 |>  
+  mutate(
+    CMUN = str_pad(CMUN, width = 3, side = "left", pad = "0"),
+    CPRO = str_pad(CPRO, width = 2, side = "left", pad = "0")) |> 
+   mutate(  
+    CPRO = trimws(CPRO),
+    CMUN = trimws(CMUN),
+    cusec = paste0(CPRO, CMUN))
+
+compra11 <- compra11 |> 
+  left_join(nombres_municipios, by = "cusec") |> 
+  left_join(nombres_provincias, by = "CPRO") |> 
+  left_join(ccaas, by = c("CPRO" = "CodigoProvincia"))
+
+
+```
+
+### 2021
+
+```{r}
+# 2021
+compra21 <- microdatos2021 |> 
+  select(CPRO, CMUN, VAREDAD, ANAC, TENEN_VIV, NORDEN, RESI_NACIM, VARANORES, VARANOM, CMUN_ANT, CMUN_UNANO, RESI_UNANO, CMUN_DANO, RESI_DANO, LTRAB, CMUN_TRAB, LEST, CMUN_EST, NORDEN_CON, NORDEN_OPA, TIPOPER, SEXO_MAD, SEXO_PAD, ESTRUC_HOG) 
+
+compra21 <- compra21 |> 
+  filter(VAREDAD %in% c(18:35), # Young 
+         TIPOPER != "H", # Not "child"
+         SEXO_PAD == "N", # Don't live with father
+         SEXO_MAD == "N") |>  # Don't live with mother
+  mutate(ESTRUC_HOG = as.numeric(ESTRUC_HOG)) |> 
+  filter(ESTRUC_HOG %in% c(01, 02, 05, 07, 08, 10, 11)) # Not an only person over 65 or children over 25
+
+# Last move being over 18 yo (risking adding some irrelevant cases)
+compra21 <- compra21 |> 
+  mutate(
+    VARANORES_r = case_when(
+      VARANORES == "0005" ~ as.numeric(2015),
+      VARANORES == "0004" ~ as.numeric(2010),
+      VARANORES %in% c("9999", "0003") ~ as.numeric(2000), 
+      VARANORES == " " ~ NA,
+      TRUE ~ as.numeric(VARANORES)),
+      ANAC = as.numeric(ANAC),
+      mayor = ifelse(VARANORES_r - ANAC > 18, TRUE, FALSE)) |> 
+  filter(mayor == TRUE)
+
+compra21 <- compra21 |> 
+  filter(NORDEN %in% c("01", "02")) # Order 1 or 2 in the household
+
+# Recode tenure regime
+compra21 <- compra21 |> 
+    mutate(
+    TENEN_VIV = case_when(
+      TENEN_VIV == 2 ~ "Propiedad",
+      TENEN_VIV == 3 ~ "Alquiler",
+      TENEN_VIV == 4 ~ "Otro")) 
+
+# Add cusec
+compra21 <- compra21 |> 
+  mutate(CPRO = trimws(CPRO), CMUN = trimws(CMUN), cusec = paste0(CPRO, CMUN))
+
+compra21 <- compra21 |> 
+  left_join(nombres_municipios, by = "cusec") |> 
+  left_join(nombres_provincias, by = "CPRO") |> 
+  left_join(ccaas, by = c("CPRO" = "CodigoProvincia"))
+
+```
+
+## Create variables per year
+
+### 2011
+
+```{r}
+
+# Solve some problems in certain municipalities
+propiedad <- propiedad %>%
+  mutate(CPRO = case_when(
+    MUN_LITERAL == "Baena" ~ "14",
+    MUN_LITERAL == "Barañain" ~ "31",
+    cusec == "47994" ~ "47",
+    MUN_LITERAL == "Calatayud" ~ "50",
+    TRUE ~ CPRO))
+
+# Add CCAA names
+compra11<-compra11 |> 
+  left_join(ccaas, by = c("CPRO" = "CodigoProvincia")) 
+
+# Tenure regime variables per municipality
+compra11 <- compra11 |>
+  group_by(cusec) |>
+  mutate(
+    Compra11Mun = round((sum(TENEN_VIV == "Compra") / n()) * 100, 2),
+    Propiedad11Mun = round((sum(TENEN_VIV %in% c("Compra", "Herencia o donación")) / n()) * 100, 2),
+    Herencia11Mun = round((sum(TENEN_VIV == "Herencia o donación") / n()) * 100, 2),
+    Alquiler11Mun = round((sum(TENEN_VIV == "Alquiler") / n()) * 100, 2),
+    Otro11Mun = round((sum(TENEN_VIV == "Otro") / n()) * 100, 2)
+  ) |>
+  ungroup()
+
+# Per province
+compra11 <- compra11 |>
+  group_by(CPRO) |>
+  mutate(
+    Compra11Prov = round((sum(TENEN_VIV == "Compra") / n()) * 100, 2),
+    Propiedad11Prov = round((sum(TENEN_VIV %in% c("Compra", "Herencia o donación")) / n()) * 100, 2),
+    Herencia11Prov = round((sum(TENEN_VIV == "Herencia o donación") / n()) * 100, 2),
+    Alquiler11Prov = round((sum(TENEN_VIV == "Alquiler") / n()) * 100, 2),
+    Otro11Prov = round((sum(TENEN_VIV == "Otro") / n()) * 100, 2)
+  ) |> 
+  ungroup()
+
+
+compra11<-compra11 |> 
+  left_join(ccaas, by = c("CPRO" = "CodigoProvincia")) 
+
+# Per CCAA
+compra11 <- compra11 |>
+  group_by(CCAA) |>
+  mutate(
+     Compra11CCAA = round((sum(TENEN_VIV == "Compra") / n()) * 100, 2),
+    Propiedad11CCAA = round((sum(TENEN_VIV %in% c("Compra", "Herencia o donación")) / n()) * 100, 2),
+    Herencia11CCAA = round((sum(TENEN_VIV == "Herencia o donación") / n()) * 100, 2),
+    Alquiler11CCAA = round((sum(TENEN_VIV == "Alquiler") / n()) * 100, 2),
+  Otro11CCAA = round((sum(TENEN_VIV == "Otro") / n()) * 100, 2)) |>
+  ungroup()
+
+```
+
+### 2021
+
+```{r}
+
+# Add CCAA
+compra21<-compra21 |> 
+  left_join(ccaas, by = c("CPRO" = "CodigoProvincia")) 
+
+# Per municipality
+compra21 <- compra21 |> 
+  group_by(cusec) |> 
+  mutate(
+    Propiedad21Mun = round((sum(TENEN_VIV == "Propiedad") / n()) * 100, 2),
+    Alquiler21Mun = round((sum(TENEN_VIV == "Alquiler") / n()) * 100, 2),
+    Otro21Mun = round((sum(TENEN_VIV == "Otro") / n()) * 100, 2)) |> 
+  ungroup()
+
+# Per province
+compra21 <- compra21 |>
+  group_by(CPRO) |>
+  mutate(
+    Propiedad21Prov = round((sum(TENEN_VIV == "Propiedad") / n()) * 100, 2),
+    Alquiler21Prov = round((sum(TENEN_VIV == "Alquiler") / n()) * 100, 2),
+    Otro21Prov = round((sum(TENEN_VIV == "Otro") / n()) * 100, 2)
+  ) |> 
+  ungroup() 
+
+# Per CCAA
+compra21 <- compra21 |> 
+  mutate(CCAA = CCAA.x) |> 
+  select(-CCAA.y)
+
+compra21 <- compra21 |>
+  group_by(CCAA) |>
+  mutate(
+    Propiedad21CCAA = round((sum(TENEN_VIV == "Propiedad") / n()) * 100, 2),
+    Alquiler21CCAA = round((sum(TENEN_VIV == "Alquiler") / n()) * 100, 2),
+    Otro21CCAA = round((sum(TENEN_VIV == "Otro") / n()) * 100, 2)
+  ) |> 
+  ungroup() 
+
+# Join small municipalities (994)
+compra21 <- compra21 |> 
+  left_join(cusec_rural_2021, by = c("cusec" = "cusec_original")) |> 
+  mutate(cusec = coalesce(cusec.y, cusec)) |> 
+  select(-cusec.y) |> 
+  group_by(cusec) |> # Group all small mun together by province 
+  mutate(Propiedad21Mun = round(mean(Propiedad21Mun), 2),
+            Alquiler21Mun = round(mean(Alquiler21Mun), 2),
+            Otro21Mun = round(mean(Otro21Mun), 2)) |> 
+  ungroup() 
+
+#Save database with individuals of target population
+#write.xlsx(compra11, "target11.xlsx")
+#write.xlsx(compra21, "target21.xlsx")
+
+```
+
+## Create difference variables
+
+```{r}
+
+# Select only tenure regime variables
+tenencia11 <- compra11 |> 
+  select(cusec, CPRO, Compra11Mun, Propiedad11Mun, Herencia11Mun, Alquiler11Mun, Otro11Mun, Propiedad11Prov, Herencia11Prov, Alquiler11Prov, Otro11Prov, Propiedad11CCAA, Herencia11CCAA, Alquiler11CCAA, Otro11CCAA) |> 
+  distinct(cusec, .keep_all = T)
+
+tenencia21 <- compra21 |> 
+  select(cusec, CPRO, Propiedad21Mun, Alquiler21Mun, Otro21Mun, Propiedad21Prov, Alquiler21Prov, Otro21Prov, Propiedad21CCAA, Alquiler21CCAA, Otro21CCAA) |> 
+  distinct(cusec, .keep_all = T)
+
+# Join both years
+tenencias <- tenencia11 |> 
+  left_join(tenencia21, by = "cusec")
+
+# Create differences
+tenencias <- tenencias |> 
+  mutate(
+    PropiedadDifMun = Propiedad21Mun - Propiedad11Mun,
+    AlquilerDifMun = Alquiler21Mun - Alquiler11Mun,
+    OtroDifMun = Otro21Mun - Otro11Mun,
+    PropiedadDifProv = Propiedad21Prov - Propiedad11Prov,
+    AlquilerDifProv = Alquiler21Prov - Alquiler11Prov,
+    OtroDifProv = Otro21Prov - Otro11Prov,
+    PropiedadDifCCAA = Propiedad21CCAA - Propiedad11CCAA,
+    AlquilerDifCCAA = Alquiler21CCAA - Alquiler11CCAA,
+    OtroDifCCAA = Otro21CCAA - Otro11CCAA)
+
+# FINAL DATABASE
+propiedad <- propiedad |> 
+  left_join(tenencias, by = "cusec") |> 
+  distinct(cusec, .keep_all=T) |> 
+  select(-CPRO.y) |> 
+  mutate(CPRO=CPRO.x)
+
+propiedad <- propiedad |>
+    filter(MUN_LITERAL != "Baena") |> # Remove because in 2021 it has more than 20k inhabitants and I don't have data from 2011
+  filter(cusec != 47994) |> # No municipalities from 10k to 20k inhabitants in Valladolid 
+  filter(MUN_LITERAL != "Calatayud") |>  # In 2021 it has less than 20k inhabitants
+  filter(MUN_LITERAL != "Barañain") # En 2021 it has less than  20k inhabitants
+
+# Save database
+#write.xlsx(propiedad, "propiedad.xlsx")
+
+```
+
+

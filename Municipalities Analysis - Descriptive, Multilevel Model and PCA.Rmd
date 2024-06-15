@@ -1,0 +1,1501 @@
+---
+title: "Municipalities Analysis - Descriptive, Multilevel model, PCA"
+output: html_document
+date: "2024-04-15"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Packages
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(haven)
+library(mice)
+library(factoextra)
+library(ggpubr)
+library(car)
+library(lmtest)
+library(lme4)
+library(flextable)
+library(sjPlot)
+library(sjmisc)
+library(sjlabelled)
+
+```
+
+## Import databases
+
+```{r}
+
+municipios <- read_xlsx("municipios.xlsx")
+
+propiedad <- read_xlsx("propiedad.xlsx")
+
+```
+
+## Descriptive of the Municipalities Database
+
+To grasp a better understanding of the database a descriptive analysis of some of the variables is performed.
+
+### Housing Price Index
+
+The Housing Price Index measures the change in housing prices, starting from a base of 100 set in 2015. The average of the General HPI, which reflects the price of all homes on the market, is 125, indicating a 25% price increase since 2015.
+
+The boxplots show that the General HPI has several outliers with a much higher value than the average. We also see that this is repeated in the cases of the HPI for Second-hand housing and New housing. The General HPI has a value much closer to the Second-hand HPI, which indicates that there are more sales of second-hand homes than new construction homes in the market.
+
+The Autonomous Communities where housing prices have increased the most are Madrid, Balearic Islands, Barcelona, Ceuta, and Melilla.
+
+```{r}
+# IPV
+mean(municipios$ipv2021General)
+mean(municipios$ipv2011General)
+
+ggplot(municipios, aes(x = 1, y = ipv2021General, fill = "ipv2021General")) +
+  geom_boxplot(position = position_dodge(width = 0.8), fill = "Orange") +
+  geom_boxplot(aes(x = 2, y = ipv2021Nueva, fill = "ipv2021Nueva"), position = position_dodge(width = 0.8), fill = "Blue") +
+  geom_boxplot(aes(x = 3, y = ipv2021Segunda, fill = "ipv2021Segunda"), position = position_dodge(width = 0.8), fill = "Green") +
+  scale_x_continuous(breaks = c(1, 2, 3), labels = c("ipv2021General", "ipv2021Nueva", "ipv2021Segunda")) +
+  labs(y = "Índice de Precio de Viviendas",
+       title = "Distribución del Índice de Precio de Viviendas por Tipo en 2021") +
+  theme_minimal()
+
+# top index value 2021
+municipios |> 
+  distinct(CCAA, .keep_all = T) |> 
+  arrange(desc(ipv2021General)) |> 
+  slice(1:5)
+
+```
+
+### RentaMedia2021
+
+Average disposable/net personal income. The average value for municipalities is €21,236 per year. However, there is a lot of variation between municipalities. The municipality with the highest income is Pozuelo de Alarcón with a value of €57,977, while the lowest income is Tudela in Navarra with €13,443.
+
+```{r}
+mean(municipios$RentaMedia2021)
+
+municipios |> 
+  arrange(desc(RentaMedia2021)) |> 
+  slice(1:3) |> 
+  select(PROV_LITERAL, MUN_LITERAL, RentaMedia2021)
+
+municipios |> 
+  arrange(RentaMedia2021) |> 
+  slice(1:3) |> 
+  select(PROV_LITERAL, MUN_LITERAL, RentaMedia2021)
+
+
+```
+
+### PorcentajeJoven
+
+The average percentage of young population in municipalities in 2021 is 36%, while in 2011 it was 39%. The number of young people has decreased.
+
+The municipaliy with the highest young population is Vícar in Almería, probably due to the high presence of young agriculture workers.
+
+```{r}
+
+mean(municipios$PorcentajeJoven2021)
+mean(municipios$PorcentajeJoven2011)
+
+municipios |> 
+  arrange(desc(PorcentajeJoven2021)) |> 
+  slice(1:3) |> 
+  select(PROV_LITERAL, MUN_LITERAL, PorcentajeJoven2021)
+
+municipios |> 
+  arrange(PorcentajeJoven2021) |> 
+  slice(1:3) |> 
+  select(PROV_LITERAL, MUN_LITERAL, PorcentajeJoven2021)
+
+
+```
+
+#- 
+# Descriptive Tenure Regimes
+
+## In 2011
+
+### Per municipality
+
+```{r}
+
+# Ownership
+top_propiedad_2011 <- propiedad %>%
+  arrange(desc(Propiedad11Mun)) %>%
+  distinct(Propiedad11Mun, .keep_all = TRUE) |> 
+  select(Propiedad11Mun, MUN_LITERAL, PROV_LITERAL, CCAA)
+
+# Purchase
+top_compra_2011 <- propiedad %>%
+  arrange(desc(Compra11Mun)) %>%
+  distinct(Compra11Mun, .keep_all = TRUE) |> 
+  select(Compra11Mun, MUN_LITERAL, PROV_LITERAL, CCAA)
+
+# Inheritance
+top_herencia_2011 <- propiedad %>%
+  arrange(desc(Herencia11Mun)) %>%
+  distinct(cusec, .keep_all = TRUE) |> 
+  select(Herencia11Mun, MUN_LITERAL, PROV_LITERAL, CCAA)
+
+# Rent
+top_alquiler_2011 <- propiedad %>%
+  arrange(desc(Alquiler11Mun)) %>%
+  distinct(cusec, .keep_all = TRUE) |> 
+  select(Alquiler11Mun, MUN_LITERAL, PROV_LITERAL, CCAA)
+
+# Other
+top_otro_2011 <- propiedad %>%
+  arrange(desc(Otro11Mun)) %>%
+  distinct(cusec, .keep_all = TRUE) |> 
+  select(Otro11Mun, MUN_LITERAL, PROV_LITERAL, CCAA)
+
+top_propiedad_2011
+top_compra_2011
+top_herencia_2011
+top_alquiler_2011
+top_otro_2011
+
+```
+
+### Per province
+
+```{r}
+
+# Ownership
+top_propiedad_2011 <- propiedad |> 
+    distinct(CPRO, .keep_all = TRUE) |> 
+    arrange(desc(Propiedad11Prov)) |> 
+    select(Herencia11Prov, PROV_LITERAL, CCAA)
+
+
+# Inheritance
+top_herencia_2011 <- propiedad |> 
+    distinct(CPRO, .keep_all = TRUE) |> 
+    arrange(desc(Herencia11Prov)) |> 
+    select(Herencia11Prov, PROV_LITERAL, CCAA)
+
+# Rent
+top_alquiler_2011 <- propiedad %>%
+  arrange(desc(Alquiler11Prov)) %>%
+  distinct(CPRO, .keep_all = TRUE) |> 
+  select(Alquiler11Prov, PROV_LITERAL, CCAA)
+
+# Other
+top_otro_2011 <- propiedad %>%
+  arrange(desc(Otro11Prov)) %>%
+  distinct(CPRO, .keep_all = TRUE) |> 
+  select(Otro11Prov, PROV_LITERAL, CCAA)
+
+top_compra_2011
+top_herencia_2011
+top_alquiler_2011
+top_otro_2011
+```
+
+### Per CCAA
+
+```{r}
+
+# Ownership
+top_propiedad_2011 <- propiedad |> 
+    distinct(CPRO, .keep_all = TRUE) |> 
+    arrange(desc(Propiedad11CCAA)) |> 
+    select(Herencia11Prov, PROV_LITERAL, CCAA)
+
+# Inheritance
+top_herencia_2011 <- propiedad |> 
+    distinct(CCAA, .keep_all = TRUE) |> 
+    arrange(desc(Herencia11CCAA)) |> 
+    select(Herencia11CCAA, CCAA)
+
+# Rent
+top_alquiler_2011 <- propiedad %>%
+  arrange(desc(Alquiler11CCAA)) %>%
+  distinct(CCAA, .keep_all = TRUE) |> 
+  select(Alquiler11CCAA, CCAA)
+
+# Other
+top_otro_2011 <- propiedad %>%
+  arrange(desc(Otro11CCAA)) %>%
+  distinct(CCAA, .keep_all = TRUE) |> 
+  select(Otro11CCAA, CCAA)
+
+top_propiedad_2011
+top_compra_2011
+top_herencia_2011
+top_alquiler_2011
+top_otro_2011
+```
+
+## In 2021
+
+### Per municipality
+
+```{r}
+# Ownership
+top_propiedad_2021 <- propiedad |> 
+    distinct(cusec, .keep_all = TRUE) |> 
+    arrange(desc(Propiedad21Mun)) |> 
+    select(Propiedad21Mun, MUN_LITERAL, PROV_LITERAL, CCAA)
+
+# Rent
+top_alquiler_2021 <- propiedad |> 
+    distinct(cusec, .keep_all = TRUE) |> 
+    arrange(desc(Alquiler21Mun)) |> 
+    select(Alquiler21Mun, MUN_LITERAL, PROV_LITERAL, CCAA)
+
+# Other
+top_otro_2021 <- propiedad |> 
+    distinct(cusec, .keep_all = TRUE) |> 
+    arrange(desc(Otro21Mun)) |> 
+    select(Propiedad21Mun, MUN_LITERAL, PROV_LITERAL, CCAA)
+
+top_propiedad_2021
+top_alquiler_2021
+top_otro_2021
+
+```
+
+### Per province
+
+```{r}
+
+# Ownership
+top_propiedad_2021 <- propiedad |> 
+    distinct(CPRO, .keep_all = TRUE) |> 
+    arrange(desc(Propiedad21Prov)) |> 
+    select(Propiedad21Prov, PROV_LITERAL, CCAA)
+
+# Rent
+top_alquiler_2021 <- propiedad |> 
+    distinct(CPRO, .keep_all = TRUE) |> 
+    arrange(desc(Alquiler21Prov)) |> 
+    select(Alquiler21Prov, PROV_LITERAL, CCAA)
+
+# Other
+top_otro_2021 <- propiedad |> 
+    distinct(CPRO, .keep_all = TRUE) |> 
+    arrange(desc(Otro21Prov)) |> 
+    select(Propiedad21Mun, PROV_LITERAL, CCAA)
+
+top_propiedad_2021
+top_alquiler_2021
+top_otro_2021
+```
+
+### Per CCAA
+
+```{r}
+
+# Ownership
+top_propiedad_2021 <- propiedad |> 
+    distinct(CCAA, .keep_all = TRUE) |> 
+    arrange(desc(Propiedad21CCAA)) |> 
+    select(Propiedad21CCAA, CCAA)
+
+# Rent
+top_propiedad_2021 <- propiedad |> 
+    distinct(CCAA, .keep_all = TRUE) |> 
+    arrange(desc(Alquiler21CCAA)) |> 
+    select(Alquiler21CCAA, CCAA)
+
+# Other
+top_propiedad_2021 <- propiedad |> 
+    distinct(CCAA, .keep_all = TRUE) |> 
+    arrange(desc(Otro21CCAA)) |> 
+    select(Otro21CCAA, CCAA)
+
+top_propiedad_2021
+top_alquiler_2021
+top_otro_2021
+```
+
+## Difference
+
+### Per municipality
+
+```{r}
+# Propiedad
+top_propiedad_dif <- propiedad |> 
+    distinct(cusec, .keep_all = TRUE) |> 
+    arrange(desc(PropiedadDifMun)) |> 
+  select(MUN_LITERAL, PROV_LITERAL, PropiedadDifMun, AlquilerDifMun, OtroDifMun, Herencia11Mun) |> 
+  filter(PropiedadDifMun > 5)
+
+# Alquiler
+top_alquiler_dif <- propiedad |> 
+    distinct(cusec, .keep_all = TRUE) |> 
+    arrange(desc(AlquilerDifMun)) |> 
+    select(Alquiler21Mun, MUN_LITERAL, PROV_LITERAL, CCAA)
+
+# Otro
+top_otro_dif <- propiedad |> 
+    distinct(cusec, .keep_all = TRUE) |> 
+    arrange(desc(OtroDifMun)) |> 
+    select(Propiedad21Mun, MUN_LITERAL, PROV_LITERAL, CCAA)
+
+top_propiedad_dif
+top_alquiler_dif
+top_otro_dif
+
+# Save top dif table
+ft <- flextable(top_propiedad_dif)
+ft <- autofit(ft)
+save_as_image(x = ft, path = paste0(getwd(), "/tablatopdif.png"))
+
+# Save bot dif table
+bot_propiedad_dif <- propiedad |> 
+    distinct(cusec, .keep_all = TRUE) |> 
+    arrange(PropiedadDifMun) |> 
+  select(MUN_LITERAL, PROV_LITERAL, PropiedadDifMun, AlquilerDifMun, OtroDifMun) |> 
+  filter(PropiedadDifMun < -28)
+
+ft <- flextable(bot_propiedad_dif)
+ft <- autofit(ft)
+save_as_image(x = ft, path = paste0(getwd(), "/tablabotdif.png"))
+
+# Graphs
+
+ggplot(top_propiedad_dif, aes(x = reorder(MUN_LITERAL, PropiedadDifMun), y = PropiedadDifMun, fill = "Propiedad")) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_bar(aes(y = AlquilerDifMun, fill = "Alquiler"), stat = "identity", position = "dodge") +
+  geom_bar(aes(y = OtroDifMun, fill = "Otro"), stat = "identity", position = "dodge") +
+  scale_fill_manual(values = c("Propiedad" = "skyblue2", "Alquiler" = "green3", "Otro" = "red2")) +
+  labs(title = "Cambios en Propiedad, Alquiler y Otro por Municipio",
+       x = "Municipio",
+       y = "Cambios",
+       fill = "Tipo de Cambio") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  guides(fill = guide_legend(title = "Tipo de Cambio")) +
+  coord_flip()+
+  theme_minimal()
+
+ggplot(bot_propiedad_dif, aes(x = reorder(MUN_LITERAL, PropiedadDifMun), y = PropiedadDifMun, fill = "Propiedad")) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_bar(aes(y = AlquilerDifMun, fill = "Alquiler"), stat = "identity", position = "dodge") +
+  geom_bar(aes(y = OtroDifMun, fill = "Otro"), stat = "identity", position = "dodge") +
+  scale_fill_manual(values = c("Propiedad" = "skyblue2", "Alquiler" = "green3", "Otro" = "red2")) +
+  labs(title = "Cambios en Propiedad, Alquiler y Otro por Municipio",
+       x = "Municipio",
+       y = "Cambios",
+       fill = "Tipo de Cambio") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  guides(fill = guide_legend(title = "Tipo de Cambio")) +
+  coord_flip()+
+  theme_minimal()
+
+```
+
+# Maps
+
+## In 2011
+
+### Per province
+
+```{r, fig.height=8, fig.width=14}
+
+library(mapSpain)
+  
+esp_can <- esp_get_country() 
+can_prov <- esp_get_can_provinces()
+can_box <- esp_get_can_box() 
+munic <- esp_get_munic() 
+
+provic <- esp_get_prov() |> 
+  mutate(CPRO = cpro)
+
+# Ownership
+mapa <- propiedad |> 
+  select(CPRO, Propiedad11Prov) |> 
+  distinct(CPRO, .keep_all = TRUE)
+
+mapa <- provic |> 
+  left_join(mapa, by = "CPRO")
+
+p1 <- ggplot(esp_can) +
+  geom_sf(color = "black", size = 0.7) +  
+  geom_sf(data = can_prov) +
+  geom_sf(data = can_box) + 
+  geom_sf(data = mapa, aes(fill = Propiedad11Prov), color = "black", size = 0.3) +  
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf, alpha = 0.2, fill = "white") +  
+geom_sf_text(data = mapa, aes(label = round(Propiedad11Prov, 1), color = ifelse(Propiedad11Prov > 75, "white", "black")), 
+             size = 2.4, check_overlap = TRUE, nudge_y = -0.03, family = "Montserrat") + 
+  theme_void() +  
+  labs(title = "% of Young People in 'Property' Residence Status in 2011") +  
+  theme(
+    legend.position = "none",
+    plot.title = element_text(family = "Calibri", size = 14),
+    text = element_text(family = "Calibri"),
+        plot.background = element_rect(fill = "white", color = NA),  
+    panel.background = element_rect(fill = "white", color = NA) 
+  ) + 
+  coord_sf() +
+  scale_fill_viridis_c(option = "C", direction = -1) +
+  scale_color_identity()  
+
+# Inheritance or donation
+
+mapa <- propiedad |> 
+  select(CPRO, Herencia11Prov) |> 
+  distinct(CPRO, .keep_all = TRUE)
+
+mapa <- provic |> 
+  left_join(mapa, by = "CPRO")
+
+p2 <- ggplot(esp_can) +
+  geom_sf(color = "black", size = 0.7) +  
+  geom_sf(data = can_prov) +
+  geom_sf(data = can_box) + 
+  geom_sf(data = mapa, aes(fill = Herencia11Prov), color = "black", size = 0.3) +  
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf, alpha = 0.2, fill = "white") +  
+  geom_sf_text(data = mapa, aes(label = round(Herencia11Prov, 1)), 
+               color = "black", size = 2.4, check_overlap = TRUE, nudge_y = -0.03, family = "Montserrat") + 
+  theme_void() +  
+  labs(title = "% of Young People in 'Inheritance/Donation' Residence Status in 2011") +  
+  theme(
+    legend.position = "none",
+    plot.title = element_text(family = "Calibri", size = 14),
+    text = element_text(family = "Calibri"),
+        plot.background = element_rect(fill = "white", color = NA), 
+    panel.background = element_rect(fill = "white", color = NA) 
+  ) + 
+  coord_sf() +
+  scale_fill_viridis_c(option = "C", direction = -1)
+
+# Rent
+mapa <- propiedad |> 
+  select(CPRO, Alquiler11Prov) |> 
+  distinct(CPRO, .keep_all = TRUE)
+
+mapa <- provic |> 
+  left_join(mapa, by = "CPRO")
+
+p3 <- ggplot(esp_can) +
+  geom_sf(color = "black", size = 0.7) +  
+  geom_sf(data = can_prov) +
+  geom_sf(data = can_box) + 
+  geom_sf(data = mapa, aes(fill = Alquiler11Prov), color = "black", size = 0.3) +  
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf, alpha = 0.2, fill = "white") +  
+  geom_sf_text(data = mapa, aes(label = round(Alquiler11Prov, 1)), 
+               color = "black", size = 2.4, check_overlap = TRUE, nudge_y = -0.03,  family = "Montserrat") + 
+  theme_void() +  
+  labs(title = "% of Young People in 'Rent' Residence Status in 2011") +  
+  theme(
+    legend.position = "none",
+    plot.title = element_text(family = "Calibri", size = 14),
+    text = element_text(family = "Calibri"),
+    plot.background = element_rect(fill = "white", color = NA), 
+    panel.background = element_rect(fill = "white", color = NA) 
+) + 
+  coord_sf() +
+  scale_fill_viridis_c(option = "C", direction = -1)
+
+# Other
+mapa <- propiedad |> 
+  select(CPRO, Otro11Prov) |> 
+  distinct(CPRO, .keep_all = TRUE)
+
+mapa <- provic |> 
+  left_join(mapa, by = "CPRO")
+
+p4 <- ggplot(esp_can) +
+  geom_sf(color = "black", size = 0.7) +  
+  geom_sf(data = can_prov) +
+  geom_sf(data = can_box) + 
+  geom_sf(data = mapa, aes(fill = Otro11Prov), color = "black", size = 0.3) +  
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf, alpha = 0.2, fill = "white") +  
+  geom_sf_text(data = mapa, aes(label = round(Otro11Prov, 1)), 
+               color = "black", size = 2.4, check_overlap = TRUE, nudge_y = -0.03, family = "Montserrat") + 
+  theme_void() +  
+  labs(title = "% of Young People in 'Other' Residence Status in 2011") +  
+  theme(
+    legend.position = "none",
+    plot.title = element_text(family = "Times New Roman", size = 14),
+    text = element_text(family = "Times New Roman"),
+    plot.background = element_rect(fill = "white", color = NA), 
+    panel.background = element_rect(fill = "white", color = NA)
+  ) + 
+  coord_sf() +
+  scale_fill_viridis_c(option = "C", direction = -1)
+
+# Save as image together
+p1 <- p1 + theme(plot.margin = margin(20, 0, 5, 0))
+p2 <- p2 + theme(plot.margin = margin(20, 0, 5, 0))
+p3 <- p3 + theme(plot.margin = margin(5, 0, 5, 0))
+p4 <- p4 + theme(plot.margin = margin(5, 0, 5, 0))
+
+# Add individual titles to each plot
+p1 <- p1 + labs(title = "Ownership") +
+  theme(plot.title = element_text(hjust = 0.6, family = "Times New Roman", size = 14))
+p2 <- p2 + labs(title = "Inheritance", family = "Times New roman") +
+  theme(plot.title = element_text(hjust = 0.6, family = "Times New Roman", size = 14))
+p3 <- p3 + labs(title = "Rent") +
+  theme(plot.title = element_text(hjust = 0.6, family = "Times New Roman", size = 14))
+p4 <- p4 + labs(title = "Other") +
+  theme(plot.title = element_text(hjust = 0.6, family = "Times New Roman", size = 14))
+
+# Add a general title
+combined_plot <- ggarrange(p1, p2, p3, p4, ncol = 2, nrow = 2, common.legend = FALSE) +
+  ggtitle("% of Young people per Tenure Regime in 2011") +
+  theme(plot.title = element_text(hjust = 0.5, size = 18, family = "Times New Roman", face = "bold"))  # Centramos el título general
+combined_plot <- annotate_figure(combined_plot, bottom = text_grob("Source: Self-elaborated from Census data", hjust = 0, x = 0, size = 14, color = "#555555", family = "Times New Roman"))
+
+# Save as image
+#ggsave("2011.png", plot = combined_plot, width = 12, height = 8, bg = "white")
+
+combined_plot
+
+
+```
+
+### Per CCAA
+
+```{r}
+library(mapSpain)
+  
+esp_can <- esp_get_country() 
+can_prov <- esp_get_can_provinces()
+can_box <- esp_get_can_box() 
+munic <- esp_get_munic() 
+ccaa <- esp_get_ccaa()
+
+ccaa <- ccaa |> 
+  mutate(CCAA = ine.ccaa.name)
+
+ccaa <- ccaa |>
+  mutate(CCAA = ine.ccaa.name) |>
+  mutate(CCAA = case_when(
+    CCAA == "Asturias, Principado de" ~ "Asturias",
+    CCAA == "Balears, Illes" ~ "Islas Baleares",
+    CCAA == "Castilla - La Mancha" ~ "Castilla-La Mancha",
+    CCAA == "Comunitat Valenciana" ~ "Comunidad Valenciana",
+    CCAA == "Madrid, Comunidad de" ~ "Comunidad de Madrid",
+    CCAA == "Murcia, Región de" ~ "Comunidad de Murcia",
+    CCAA == "Navarra, Comunidad Foral de" ~ "Comunidad Foral de Navarra",
+    CCAA == "Rioja, La" ~ "La Rioja",
+    TRUE ~ CCAA
+  ))
+
+# Ownership
+mapa <- propiedad |> 
+  select(CCAA, Propiedad11CCAA) |> 
+  distinct(CCAA, .keep_all = TRUE)
+
+mapa <- ccaa |> 
+  left_join(mapa, by = "CCAA")
+
+p1 <- ggplot(esp_can) +
+  geom_sf(color = "black", size = 0.7) +  
+  geom_sf(data = can_prov) +
+  geom_sf(data = can_box) + 
+  geom_sf(data = mapa, aes(fill = Propiedad11CCAA), color = "black", size = 0.3) +  
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf, alpha = 0.2, fill = "white") +  
+  geom_sf_text(data = mapa, aes(label = round(Propiedad11CCAA, 1), color = ifelse(Propiedad11CCAA > 75, "white", "black")), 
+               size = 2.4, check_overlap = TRUE, nudge_y = -0.03) + 
+  theme_void() +  
+  labs(title = "% of Young People in 'Property' Residence Status in 2011") +  
+  theme(
+    legend.position = "none",
+    plot.title = element_text(family = "Calibri", size = 14),
+    text = element_text(family = "Calibri"),
+        plot.background = element_rect(fill = "white", color = NA),  # Fondo blanco para la figura
+    panel.background = element_rect(fill = "white", color = NA)  # Fondo blanco para el panel
+  ) + 
+  coord_sf() +
+  scale_fill_viridis_c(option = "C", direction = -1) +
+  scale_color_identity()  
+
+# Herencia o donación
+mapa <- propiedad |> 
+  select(CCAA, Herencia11CCAA) |> 
+  distinct(CCAA, .keep_all = TRUE)
+
+mapa <- ccaa |> 
+  left_join(mapa, by = "CCAA")
+
+p2 <- ggplot(esp_can) +
+  geom_sf(color = "black", size = 0.7) +  
+  geom_sf(data = can_prov) +
+  geom_sf(data = can_box) + 
+  geom_sf(data = mapa, aes(fill = Herencia11CCAA), color = "black", size = 0.3) +  
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf, alpha = 0.2, fill = "white") +  
+  geom_sf_text(data = mapa, aes(label = round(Herencia11CCAA, 1)), 
+               color = "black", size = 2.4, check_overlap = TRUE, nudge_y = -0.03) + 
+  theme_void() +  
+  labs(title = "% of Young People in 'Inheritance/Donation' Residence Status in 2011") +  
+  theme(
+    legend.position = "none",
+    plot.title = element_text(family = "Calibri", size = 14),
+    text = element_text(family = "Calibri"),
+        plot.background = element_rect(fill = "white", color = NA),  
+    panel.background = element_rect(fill = "white", color = NA)  
+  ) + 
+  coord_sf() +
+  scale_fill_viridis_c(option = "C", direction = -1)
+
+# Rent
+mapa <- propiedad |> 
+  select(CCAA, Alquiler11CCAA) |> 
+  distinct(CCAA, .keep_all = TRUE)
+
+mapa <- ccaa |> 
+  left_join(mapa, by = "CCAA")
+
+p3 <- ggplot(esp_can) +
+  geom_sf(color = "black", size = 0.7) +  
+  geom_sf(data = can_prov) +
+  geom_sf(data = can_box) + 
+  geom_sf(data = mapa, aes(fill = Alquiler11CCAA), color = "black", size = 0.3) +  
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf, alpha = 0.2, fill = "white") +  
+  geom_sf_text(data = mapa, aes(label = round(Alquiler11CCAA, 1)), 
+               color = "black", size = 2.4, check_overlap = TRUE, nudge_y = -0.03) + 
+  theme_void() +  
+  labs(title = "% of Young People in 'Rent' Residence Status in 2011") +  
+  theme(
+    legend.position = "none",
+    plot.title = element_text(family = "Calibri", size = 14),
+    text = element_text(family = "Calibri"),
+    plot.background = element_rect(fill = "white", color = NA), 
+    panel.background = element_rect(fill = "white", color = NA)
+) + 
+  coord_sf() +
+  scale_fill_viridis_c(option = "C", direction = -1)
+
+# Other
+mapa <- propiedad |> 
+  select(CCAA, Otro11CCAA) |> 
+  distinct(CCAA, .keep_all = TRUE)
+
+mapa <- ccaa |> 
+  left_join(mapa, by = "CCAA")
+
+p4 <- ggplot(esp_can) +
+  geom_sf(color = "black", size = 0.7) +  
+  geom_sf(data = can_prov) +
+  geom_sf(data = can_box) + 
+  geom_sf(data = mapa, aes(fill = Otro11CCAA), color = "black", size = 0.3) +  
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf, alpha = 0.2, fill = "white") +  
+  geom_sf_text(data = mapa, aes(label = round(Otro11CCAA, 1)), 
+               color = "black", size = 2.4, check_overlap = TRUE, nudge_y = -0.03) + 
+  theme_void() +  
+  labs(title = "% of Young People in 'Other' Residence Status in 2011") +  
+  theme(
+    legend.position = "none",
+    plot.title = element_text(family = "Calibri", size = 14),
+    text = element_text(family = "Calibri"),
+    plot.background = element_rect(fill = "white", color = NA), 
+    panel.background = element_rect(fill = "white", color = NA) 
+  ) + 
+  coord_sf() +
+  scale_fill_viridis_c(option = "C", direction = -1)
+
+p1 <- p1 + theme(plot.margin = margin(5, 5, 5, 5))
+p2 <- p2 + theme(plot.margin = margin(5, 5, 5, 5))
+p3 <- p3 + theme(plot.margin = margin(5, 5, 5, 5))
+p4 <- p4 + theme(plot.margin = margin(5, 5, 5, 5))
+
+combined_plot <- ggarrange(p1, p2, p3, p4, ncol = 2, nrow = 2)
+
+```
+
+## In 2021
+
+### Per province
+
+```{r, fig.height=8, fig.width=17}
+library(mapSpain)
+
+esp_can <- esp_get_country() 
+can_prov <- esp_get_can_provinces()
+can_box <- esp_get_can_box() 
+munic <- esp_get_munic() 
+
+provic <- esp_get_prov() |> 
+  mutate(CPRO = cpro)
+
+mapa <- propiedad |> 
+  select(CPRO, Propiedad21Prov) |> 
+  distinct(CPRO, .keep_all = TRUE)
+
+mapa <- provic |> 
+  left_join(mapa, by = "CPRO")
+
+# Ownership
+p5 <- ggplot(esp_can) +
+  geom_sf(color = "black", size = 0.7) +  
+  geom_sf(data = can_prov) +
+  geom_sf(data = can_box) + 
+  geom_sf(data = mapa, aes(fill = Propiedad21Prov), color = "black", size = 0.3) +  
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf, alpha = 0.2, fill = "white") +  
+  geom_sf_text(data = mapa, aes(label = round(Propiedad21Prov, 1), color = ifelse(Propiedad21Prov > 75, "white", "black")), 
+               size = 2.4, check_overlap = TRUE, nudge_y = -0.03, family = "Montserrat") + 
+  theme_void() +  
+  labs(title = "% of Young People in 'Property' Residence Status in 2021") +  
+  theme(
+    legend.position = "none",
+    plot.title = element_text(family = "Calibri", size = 14),
+    text = element_text(family = "Calibri"),
+    plot.background = element_rect(fill = "white", color = NA), 
+    panel.background = element_rect(fill = "white", color = NA) 
+  ) + 
+  coord_sf() +
+  scale_fill_viridis_c(option = "C", direction = -1) +
+  scale_color_identity()  
+ 
+# Rent
+mapa <- propiedad |> 
+  select(CPRO, Alquiler21Prov) |> 
+  distinct(CPRO, .keep_all = TRUE)
+
+mapa <- provic |> 
+  left_join(mapa, by = "CPRO")
+
+p6 <- ggplot(esp_can) +
+  geom_sf(color = "black", size = 0.7) +  
+  geom_sf(data = can_prov) +
+  geom_sf(data = can_box) + 
+  geom_sf(data = mapa, aes(fill = Alquiler21Prov), color = "black", size = 0.3) +  
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf, alpha = 0.2, fill = "white") +  
+  geom_sf_text(data = mapa, aes(label = round(Alquiler21Prov, 1), 
+                                color = ifelse(Alquiler21Prov > 38, "white", "black")), 
+               size = 2.4, check_overlap = TRUE, nudge_y = -0.03, family = "Montserrat") + 
+  theme_void() +  
+  labs(title = "% of Young People in 'Rent' Residence Status in 2021") +  
+  theme(
+    legend.position = "none",
+    plot.title = element_text(family = "Calibri", size = 14),
+    text = element_text(family = "Calibri")) + 
+  coord_sf() +
+  scale_fill_viridis_c(option = "C", direction = -1) +
+  scale_color_identity()  
+
+# Other
+mapa <- propiedad |> 
+  select(CPRO, Otro21Prov) |> 
+  distinct(CPRO, .keep_all = TRUE)
+
+mapa <- provic |> 
+  left_join(mapa, by = "CPRO")
+
+p7 <-ggplot(esp_can) +
+  geom_sf(color = "black", size = 0.7) +  
+  geom_sf(data = can_prov) +
+  geom_sf(data = can_box) + 
+  geom_sf(data = mapa, aes(fill = Otro21Prov), color = "black", size = 0.3) +  
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf, alpha = 0.2, fill = "white") +  
+  geom_sf_text(data = mapa, aes(label = round(Otro21Prov, 1), color = ifelse(Otro21Prov > 19, "white", "black")), size = 2.4, check_overlap = TRUE, nudge_y = -0.03, family = "Montserrat") + 
+  theme_void() +  
+  labs(title = "% of Young People in 'Other' Residence Status in 2021") +  
+  theme(
+    legend.position = "none",
+    plot.title = element_text(family = "Calibri", size = 14),
+    text = element_text(family = "Calibri")) + 
+  coord_sf() +
+  scale_fill_viridis_c(option = "C", direction = -1) +
+  scale_color_identity()  
+
+# Save as image together
+p5 <- p5 + theme(plot.margin = margin(20, 0, 5, 0))
+p6 <- p6 + theme(plot.margin = margin(20, 0, 5, 0))
+p7 <- p7 + theme(plot.margin = margin(5, 0, 5, 0))
+
+# Add individual titles
+p5 <- p5 + labs(title = "Ownership") +
+  theme(plot.title = element_text(hjust = 0.6, family = "Times New Roman", size = 14))
+p6 <- p6 + labs(title = "Rent", family = "Times New roman") +
+  theme(plot.title = element_text(hjust = 0.6, family = "Times New Roman", size = 14))
+p7 <- p7 + labs(title = "Other") +
+  theme(plot.title = element_text(hjust = 0.6, family = "Times New Roman", size = 14))
+
+# Add general title
+combined_plot <- ggarrange(p5, p6, p7, ncol = 2, nrow = 2, common.legend = FALSE) +
+  ggtitle("% of Young people per Tenure Regime in 2021") +
+  theme(plot.title = element_text(hjust = 0.5, size = 18, family = "Times New Roman", face = "bold"))  
+
+combined_plot <- annotate_figure(combined_plot, bottom = text_grob("Source: Self-elaborated from Census data", hjust = 0, x = 0, size = 14, color = "#555555", family = "Times New Roman"))
+
+# Save as image
+#ggsave("2021.png", plot = combined_plot, width = 12, height = 8, bg = "white")
+
+combined_plot
+
+```
+
+## Difference
+
+### Per municipality
+
+```{r}
+library(mapSpain)
+  
+esp_can <- esp_get_country() 
+can_prov <- esp_get_can_provinces()
+can_box <- esp_get_can_box() 
+munic <- esp_get_munic() 
+
+munic <- munic |>  
+  mutate(cusec = LAU_CODE) |> 
+  select(geometry, cusec)
+
+# Ownership
+mapa <- propiedad |> 
+  select(cusec, PropiedadDifMun)
+  
+mapa <- munic |> 
+  left_join(mapa, by = "cusec")
+
+mapa <- mapa |> filter(!is.na(PropiedadDifMun)) 
+
+pa <- ggplot(esp_can) +
+  geom_sf(color = "black", size = 0.7) +  
+  geom_sf(data = can_prov) +
+  geom_sf(data = can_box) + 
+  geom_sf(data = mapa, aes(fill = PropiedadDifMun), color = "black", size = 0.3) +  
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf, alpha = 0.2, fill = "white") +  
+  theme_void() +  
+  labs(title = "Difference of % of Young People in 'Property' Residence Status in 2011 to 2021") +  
+  theme(
+    legend.position = "none",
+    plot.title = element_text(family = "Calibri", size = 14),
+    text = element_text(family = "Calibri")
+  ) + 
+  coord_sf() +
+  scale_fill_gradient2(low = "red", mid = "white", high = "green", midpoint = 0)
+
+# Rent
+mapa <- propiedad |> 
+  select(cusec, AlquilerDifMun)
+  
+mapa <- munic |> 
+  left_join(mapa, by = "cusec")
+  
+mapa <- mapa |> filter(!is.na(AlquilerDifMun))
+
+pb <- ggplot(esp_can) +
+  geom_sf(color = "black", size = 0.7) +  
+  geom_sf(data = can_prov) +
+  geom_sf(data = can_box) + 
+  geom_sf(data = mapa, aes(fill = AlquilerDifMun), color = "black", size = 0.3) +  
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf, alpha = 0.2, fill = "white") +  
+  theme_void() +  
+  labs(title = "Difference of % of Young People in 'Rent' Residence Status in 2011 to 2021") +  
+  theme(
+    legend.position = "none",
+    plot.title = element_text(family = "Calibri", size = 14),
+    text = element_text(family = "Calibri")
+  ) + 
+  coord_sf() +
+  scale_fill_gradient2(low = "red", mid = "white", high = "green", midpoint = 0)
+
+ggarrange(pa, pb, ncol = 2, nrow = 1)
+```
+
+### Per province
+
+```{r, fig.height=8, fig.width=17}
+library(mapSpain)
+
+esp_can <- esp_get_country() 
+can_prov <- esp_get_can_provinces()
+can_box <- esp_get_can_box() 
+munic <- esp_get_munic() 
+
+provic <- esp_get_prov() |> 
+  mutate(CPRO = cpro)
+
+# Propiedad
+mapa <- propiedad |> 
+  select(CPRO, PropiedadDifProv) |> 
+  distinct(CPRO, .keep_all = TRUE)
+
+mapa <- provic |> 
+  left_join(mapa, by = "CPRO")
+
+  p8 <- ggplot(esp_can) +
+  geom_sf(color = "black", size = 0.7) +  
+  geom_sf(data = can_prov) +
+  geom_sf(data = can_box) + 
+  geom_sf(data = mapa, aes(fill = PropiedadDifProv), color = "black", size = 0.3) +  
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf, alpha = 0.2, fill = "white") +  
+  geom_sf_text(data = mapa, aes(label = round(PropiedadDifProv, 1)), 
+               color = "black", size = 2.4, check_overlap = TRUE, nudge_y = -0.03) + 
+  theme_void() +  
+  labs(title = "Difference of % of Young People in 'Property' Residence Status in 2011 to 2021") +  
+  theme(
+    legend.position = "none",
+    plot.title = element_text(family = "Calibri", size = 14),
+    text = element_text(family = "Calibri")
+  ) + 
+  coord_sf() +
+  scale_fill_gradient2(low = "red", mid = "white", high = "green", midpoint = 0)
+
+# Rent
+mapa <- propiedad |> 
+  select(CPRO, AlquilerDifProv) |> 
+  distinct(CPRO, .keep_all = TRUE)
+
+mapa <- provic |> 
+  left_join(mapa, by = "CPRO")
+
+p9<- ggplot(esp_can) +
+  geom_sf(color = "black", size = 0.7) +  
+  geom_sf(data = can_prov) +
+  geom_sf(data = can_box) + 
+  geom_sf(data = mapa, aes(fill = AlquilerDifProv), color = "black", size = 0.3) +  
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf, alpha = 0.2, fill = "white") +  
+  geom_sf_text(data = mapa, aes(label = round(AlquilerDifProv, 1)), color = "black", size = 2.4, check_overlap = TRUE, nudge_y = -0.03, family = "Montserrat") + 
+  theme_void() +  
+  labs(title = "Difference of % of Young People in 'Rent' Residence Status in 2011 to 2021") +  
+  theme(
+    legend.position = "none",
+    plot.title = element_text(family = "Calibri", size = 14),
+    text = element_text(family = "Calibri")) + 
+  coord_sf() +
+  scale_fill_gradient2(low = "red", mid = "white", high = "green", midpoint = 0)
+
+# Other
+mapa <- propiedad |> 
+  select(CPRO, OtroDifProv) |> 
+  distinct(CPRO, .keep_all = TRUE)
+
+mapa <- provic |> 
+  left_join(mapa, by = "CPRO")
+
+p10<- ggplot(esp_can) +
+  geom_sf(color = "black", size = 0.7) +  
+  geom_sf(data = can_prov) +
+  geom_sf(data = can_box) + 
+  geom_sf(data = mapa, aes(fill = OtroDifProv), color = "black", size = 0.3) +  
+  annotate("rect", xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf, alpha = 0.2, fill = "white") +  
+  geom_sf_text(data = mapa, aes(label = round(OtroDifProv, 1)), color = "black", size = 2.4, check_overlap = TRUE, nudge_y = -0.03, family = "Montserrat") + 
+  theme_void() +  
+  labs(title = "Difference of % of Young People in 'Rent' Residence Status in 2011 to 2021") +  
+  theme(
+    legend.position = "none",
+    plot.title = element_text(family = "Calibri", size = 14),
+    text = element_text(family = "Calibri")) + 
+  coord_sf() +
+  scale_fill_gradient2(low = "red", mid = "white", high = "green", midpoint = 0)
+
+# Save as image together
+p8 <- p8 + theme(plot.margin = margin(10, 0, 0, -30))
+p9 <- p9 + theme(plot.margin = margin(0, 0, 0, -30))
+
+# Add individual titles
+p8 <- p8 + labs(title = "Ownership") +
+  theme(plot.title = element_text(hjust = 0.6, family = "Times New Roman", size = 14))
+p9 <- p9 + labs(title = "Rent", family = "Times New roman") +
+  theme(plot.title = element_text(hjust = 0.6, family = "Times New Roman", size = 14))
+
+# Add title
+combined_plot <- ggarrange(p8, p9, ncol = 1, nrow = 2, common.legend = FALSE) +
+  ggtitle("Difference of % of Young people per Tenure Regime in 2011 to 2021") +
+  theme(plot.title = element_text(hjust = 0.5, size = 14, family = "Times New Roman", face = "bold"))  # Centramos el título general
+
+combined_plot <- annotate_figure(combined_plot, bottom = text_grob("Source: Self-elaborated from Census data", hjust = 0.5, x = 0.5, size = 12, color = "#555555", family = "Times New Roman"))
+
+# Save as image
+#ggsave("difpropiedadalquiler.png", plot = combined_plot, width = 12, height = 8, bg = "white")
+
+combined_plot
+```
+# -
+# Multilevel model
+
+```{r}
+# Check we have the data
+municipios <- read_xlsx("municipios.xlsx")
+
+numeric_data <- municipios %>%
+  ungroup() |> 
+  select_if(is.numeric) 
+
+# Scale
+numeric_data <- scale(numeric_data)
+numeric_data <- as.data.frame(numeric_data)
+
+#Add CPRO and CCAA columns
+numeric_data <- numeric_data %>%
+  mutate(id = row_number())
+
+cpros <- municipios |> 
+  select(cusec, CPRO, CCAA) |> 
+  mutate(id = row_number())
+
+numeric_data <- numeric_data |> 
+  left_join(cpros, by = "id") |> 
+  select(-id)
+
+# Select variables
+independientes <- numeric_data |> 
+  select(CCAA, CPRO, cusec, PropiedadDifMun, ipvGeneralDif, PorcentajeJovenDif, VaciasDif, SecundariasDif, PorcentajeEspañolaDif, PorcentajeEuropeaDif, PorcentajeNoEuropeaDif, DifPrecioHipotecaProv, ParoJuvenilDif, ProtegidaDif, RentaMedia2021, PorcentajeTurísticas2021, PrecioAlquilerM2, Herencia11Mun) |> 
+
+  # Feature engineering
+    mutate(PrecioAlquilerM22=PrecioAlquilerM2^2,
+         RentaMedia2021_2 = RentaMedia2021^2,
+         PorcentajeTurísticas2021_2 = PorcentajeTurísticas2021^2,
+         DifPrecioHipotecaProv2 = DifPrecioHipotecaProv^2,
+         Herencia11Mun2 = (Herencia11Mun)^2,
+           VaciasDif2 = VaciasDif^2,
+           RentaMedia2021_exp = exp(RentaMedia2021),
+         PorcentajeEspañolaDif2 = PorcentajeEspañolaDif^2,
+        PorcentajeEuropeaDif2 = PorcentajeEuropeaDif^2,
+         PorcentajeNoEuropeaDif2 = PorcentajeNoEuropeaDif^2,
+    SecundariasDif2 = (SecundariasDif)^2)
+
+variables <- independientes |> 
+  select(CCAA, CPRO, PropiedadDifMun, Herencia11Mun, PorcentajeJovenDif, VaciasDif, SecundariasDif, PorcentajeNoEuropeaDif, DifPrecioHipotecaProv, ParoJuvenilDif, ProtegidaDif, PorcentajeTurísticas2021, PrecioAlquilerM2, RentaMedia2021_2, PrecioAlquilerM22, DifPrecioHipotecaProv2, Herencia11Mun2, PorcentajeEspañolaDif2, PorcentajeEuropeaDif2, RentaMedia2021, PorcentajeTurísticas2021_2)
+
+```
+
+The model itself
+
+```{r}
+
+modelo_multi <- lmer(PropiedadDifMun ~ PorcentajeJovenDif + PorcentajeEspañolaDif2 + PorcentajeEspañolaDif2 +  PorcentajeNoEuropeaDif + RentaMedia2021 + VaciasDif + PorcentajeTurísticas2021 + PorcentajeTurísticas2021_2 + PrecioAlquilerM2 +  + PrecioAlquilerM22 + Herencia11Mun +  Herencia11Mun2 + (1|CPRO) + (1|CCAA), data = variables)
+
+summary(modelo_multi)
+
+# Test multicolinearity
+vif(modelo_multi)
+
+# Get table
+
+tab_model(modelo_multi, show.ci = F, show.se = T, pred.labels = c("(Intercept)", "Young Population Diff", "Spanish Population Diff ^2", "European Population Diff ^2", "Non-European Population Diff", "Average Income 2021", "Empty Dwellings Diff", "Tourist Dwellings 2021", "Tourist Dwellings 2021", "M2 Rental Price 2021", "M2 Rental Price 2021 ^2", "Inheritance 2011", "Inheritance 2011 ^2"))
+
+# Table of random effects intercepts
+ranef(modelo_multi)
+
+random_effects <- ranef(modelo_multi)
+
+random_effects_df <- as.data.frame(random_effects)
+
+# Add labels
+locations <- read_excel("vivienda turística/exp_viv_turistica_tabla5_FEB2021.xlsx", sheet = 3, na = "Dato protegido por secreto estadístico.")
+
+nombres_provincias <- locations |> 
+  select(PROV_LITERAL, PROV) |> 
+  rename(CPRO = PROV) |> 
+  distinct(CPRO, .keep_all = TRUE)
+
+nombres <- nombres_provincias$PROV_LITERAL
+rownames(random_effects_df)[1:52] <- nombres[1:52]
+
+#ccaa
+ccaa <- unique(municipios$CCAA)
+
+ccaa <- as.data.frame(ccaa)
+
+ccaa <- ccaa %>%
+  mutate(ccaa = if_else(ccaa %in% nombres, paste0(ccaa, " (CCAA)"), ccaa))
+
+# Final RF table
+tab_df(random_effects_df, 
+          title = "Random Effects Estimates", 
+          show.rownames = TRUE) 
+
+```
+
+
+### Normality
+
+Heterocedasticity was tested on a linear model just like the final multilevel model but without the random effects. There was a little heterocedasticity but residuals didn't distribute in clear patterns.
+
+Regarding normality, the Shapiro-Wilk test gives a value less than 0.05, which tells us that the data do not follow a normal distribution.
+
+However, in the QQ plot, we see that the data mostly fit the line perfectly, but at the beginning and the end, they deviate symmetrically: at the beginning, the values that separate from the line go down, and at the end, they go up. It appears to follow a normal or 'light-tailed' distribution. This is related to having fewer extreme values than a normal distribution.
+
+```{r}
+#qq plot
+residuos <- resid(modelo_multi)
+
+qqnorm(residuos)
+qqline(residuos)
+shapiro.test(residuos)
+
+```
+
+
+### Independent vs Dependent Variable Relationships Plots
+```{r, fig.height=6, fig.width=12}
+
+independientes <- independientes %>%
+  select_if(is.numeric)
+
+# Get names of independent variables
+variables_independientes <- setdiff(names(independientes), "PropiedadDifMun")
+
+# Function to get plots & trasnform variables
+generar_grafico <- function(variable) {
+  # Crear transformaciones
+  independientes[[paste0(variable, "2")]] <- independientes[[variable]]^2
+  independientes[[paste0(variable, "_sqrt")]] <- sqrt(independientes[[variable]])
+  independientes[[paste0(variable, "_log")]] <- log(independientes[[variable]] + 1) 
+  
+  # Lineal models
+  modelo_original <- lm(PropiedadDifMun ~ ., data = independientes[, c("PropiedadDifMun", variable)])
+  modelo_cuadrado <- lm(PropiedadDifMun ~ ., data = independientes[, c("PropiedadDifMun", variable, paste0(variable, "2"))])
+  modelo_sqrt <- lm(PropiedadDifMun ~ ., data = independientes[, c("PropiedadDifMun", variable, paste0(variable, "_sqrt"))])
+  modelo_log <- lm(PropiedadDifMun ~ ., data = independientes[, c("PropiedadDifMun", variable, paste0(variable, "_log"))])
+
+  # Create value ranges
+  rango_variable <- seq(min(independientes[[variable]], na.rm = TRUE), max(independientes[[variable]], na.rm = TRUE), length.out = 100)
+  newdata <- data.frame(variable = rango_variable)
+  colnames(newdata) <- variable
+  newdata[[paste0(variable, "2")]] <- rango_variable^2
+  newdata[[paste0(variable, "_sqrt")]] <- sqrt(rango_variable)
+  newdata[[paste0(variable, "_log")]] <- log(rango_variable + 1)
+  
+  # Predictions
+  pred_original <- predict(modelo_original, newdata = newdata)
+  pred_cuadrado <- predict(modelo_cuadrado, newdata = newdata)
+  pred_sqrt <- predict(modelo_sqrt, newdata = newdata)
+  pred_log <- predict(modelo_log, newdata = newdata)
+
+  # Plot
+  plot(independientes[[variable]], independientes$PropiedadDifMun, 
+       xlab = variable, ylab = "PropiedadDifMun", main = paste("Relación entre", variable, "y PropiedadDifMun"),
+       col = "blue", pch = 16)
+  lines(rango_variable, pred_original, col = "red", lwd = 2)
+  lines(rango_variable, pred_cuadrado, col = "green", lwd = 2, lty = 2)
+  lines(rango_variable, pred_sqrt, col = "purple", lwd = 2, lty = 3)
+  lines(rango_variable, pred_log, col = "orange", lwd = 2, lty = 4)
+  legend("topright", legend = c("Datos", "Original", "Cuadrado", "Raíz Cuadrada", "Logaritmo"),
+         col = c("blue", "red", "green", "purple", "orange"), pch = c(16, NA, NA, NA, NA), 
+         lwd = c(NA, 2, 2, 2, 2), lty = c(NA, 1, 2, 3, 4))
+}
+
+# Create variables per each independent variable
+for (variable in variables_independientes) {
+  generar_grafico(variable)
+}
+
+```
+
+### Variable distributions
+```{r}
+
+variables_independientes <- c("ipv2021General", "PorcentajeJovenDif", "VaciasDif", "SecundariasDif", "DifPrecioHipotecaProv", "ParoJuvenilDif", "ProtegidaDif", "RentaMedia2021", "PorcentajeTurísticas2021", "PrecioAlquilerM2", "Herencia11Mun")
+
+par(mfrow = c(4, 3))  
+
+independientes <- independientes %>%
+  select_if(is.numeric)
+
+# Create histograms per each variable
+for (variable in variables_independientes) {
+  if (is.numeric(independientes[[variable]])) {
+    hist(independientes[[variable]], main = paste("Histograma de", variable),
+         xlab = variable, col = "skyblue", border = "white")
+  } else {
+    warning(paste("Variable", variable, "is not numeric and will be skipped."))
+  }
+}
+```
+
+# -
+# Principal component analysis
+
+I keep all variables included in the multilevel model and the variables of the Difference in all tenure regimes.
+
+```{r}
+
+municipios <- read_xlsx("municipios.xlsx")
+
+municipios <- municipios |> 
+    mutate(MUN_LITERAL = ifelse(grepl("\\d", MUN_LITERAL), paste(MUN_LITERAL, PROV_LITERAL), MUN_LITERAL))
+
+# Keep province name in the rural municipalities names
+names = municipios$MUN_LITERAL
+prov = municipios$PROV_LITERAL
+ccaa = municipios$CCAA
+
+numeric_data <- municipios %>%
+  ungroup() |> 
+  select_if(is.numeric) 
+
+numeric_data <- scale(numeric_data)
+numeric_data <- as.data.frame(numeric_data)
+
+# Select variables from multilevel model
+selected_vars <- numeric_data %>% 
+  select(PropiedadDifMun, AlquilerDifMun, OtroDifMun, Herencia11Mun, PorcentajeJovenDif, VaciasDif, SecundariasDif, PorcentajeNoEuropeaDif, DifPrecioHipotecaProv, ParoJuvenilDif, ProtegidaDif, PorcentajeTurísticas2021, PrecioAlquilerM2, RentaMedia2021)
+
+# Creating the components
+set.seed(123)
+pca = prcomp(selected_vars, scale=T)
+summary(pca)
+
+# Plot of the variability explained by components
+fviz_screeplot(pca, addlabels = TRUE)
+
+```
+
+### Component 1
+```{r}
+# Contribution of variables to component 1
+fviz_contrib(pca, choice = "var", axes = 1)
+
+# Plot adjustments
+n <- 10
+col_pos <- colorRampPalette(c("#CCE6CC", "#208909"))(n)
+col_neg <- colorRampPalette(c("#FFE6E6", "#B30000"))(n)
+coefs <- pca$rotation[,1]
+valor_max <- max(coefs)
+valor_min <- min(coefs)
+coefs_ajustados <- coefs - valor_min + 1
+colores <- ifelse(coefs >= 0, col_pos[ceiling((coefs_ajustados / (valor_max - valor_min + 1)) * n)], 
+                  col_neg[ceiling((abs(coefs_ajustados) / (valor_max - valor_min + 1)) * n)])
+
+# Plot
+barplot(coefs, las = 2, col = colores, cex.names = 0.8)
+
+#Ranking of municipalities of this component
+names[order(pca$x[,1], decreasing=T)][1:5]
+names[order(pca$x[,1])][1:5]
+```
+
+### Component 2
+
+```{r}
+
+# Contribution of variables to component 1
+fviz_contrib(pca, choice = "var", axes = 2)
+
+# Plot adjustments
+n <- 10
+col_pos <- colorRampPalette(c("#CCE6CC", "#208909"))(n)
+col_neg <- colorRampPalette(c("#FFE6E6", "#B30000"))(n)
+coefs <- pca$rotation[,2]
+valor_max <- max(coefs)
+valor_min <- min(coefs)
+coefs_ajustados <- coefs - valor_min + 1
+colores <- ifelse(coefs >= 0, col_pos[ceiling((coefs_ajustados / (valor_max - valor_min + 1)) * n)], 
+                  col_neg[ceiling((abs(coefs_ajustados) / (valor_max - valor_min + 1)) * n)])
+
+# Plot
+barplot(coefs, las = 2, col = colores, cex.names = 0.8)
+
+#Ranking of municipalities of this component
+names[order(pca$x[,2], decreasing=T)][1:5]
+names[order(pca$x[,2])][1:5]
+
+```
+
+### Components plot
+
+```{r, fig.height=5, fig.width=10}
+p <-data.frame(z1 = pca$x[,1], z2 = pca$x[,2]) %>%
+  ggplot(aes(z1, z2, label = names, color = ccaa)) +
+  geom_point(size = 0) +
+  labs(title = "First two principal components (scores)", x = "PC1", y = "PC2") +  theme_bw() +   theme(legend.position = "bottom") +
+  geom_text(size = 3, hjust = 0.6, vjust = 0, check_overlap = T)
+
+p
+
+# Versión interactiva
+library(plotly)
+ggplotly(p)
+
+```
+
+### Clusters
+How many clusters?
+Two methods suggest 2, the third one 5.
+
+```{r}
+fviz_nbclust(scale(selected_vars), kmeans, method = 'wss', k.max = 20, nstart = 1000)
+
+fviz_nbclust(scale(selected_vars), kmeans, method = 'silhouette', k.max = 20, nstart = 1000)
+
+fviz_nbclust(scale(selected_vars), kmeans, method = 'gap_stat', k.max = 10, nstart = 100, nboot = 100)
+
+```
+
+Cluster plot
+
+```{r, fig.height=6, fig.width=12}
+
+set.seed(123)
+fit <- kmeans(selected_vars, centers = 5, nstart = 100)
+fit
+
+selected_vars$cluster <- fit$cluster
+
+centers=fit$centers
+
+barplot(centers[1,], las=2, col="#097969")
+barplot(centers[2,], las=2, col="#097969")
+
+p <-fviz_cluster(fit, data = selected_vars, geom = c("point"), ellipse.type = 'norm', pointsize = 1, show.clust.cent = FALSE) +
+  theme_minimal() + geom_text(label = names, hjust = 0, vjust = 0, size = 2, check_overlap = TRUE) +
+  scale_fill_brewer(palette = "Paired", guide = FALSE)
+p
+
+ggsave(filename = "cluster_plot.png", plot = p, width = 8, height = 4, dpi = 300)
+
+
+library(plotly)
+ggplotly(p)
+
+```
+
+# -
+# Extras
+### Logit model
+
+This model was tested although not used for the final work.
+
+If I do not balance the classes, 96% of predictions is a decrease and 32% is an increase in property. The accuracy is 85%, which is logical because the classes are unbalanced. We see that the specificity is 96%, meaning it accurately predicts decreases, but the sensitivity is only 0.32, meaning it poorly detects increases.
+
+If the classes are balanced with N=1000, the accuracy drops to 72%, specificity to 71%, but the sensitivity increases to 73%.
+
+```{r}
+
+# Preparar datos
+municipios <- read_xlsx("municipios.xlsx")
+
+municipios <- municipios |> 
+    mutate(MUN_LITERAL = ifelse(grepl("\\d", MUN_LITERAL), paste(MUN_LITERAL, PROV_LITERAL), MUN_LITERAL))
+
+numeric_data <- municipios %>%
+  ungroup() |> 
+  select_if(is.numeric) 
+
+numeric_data <- numeric_data %>%
+  mutate(Propiedad = ifelse(PropiedadDifMun >= 0, 1, 0)) %>%
+  select(Propiedad, RentaMedia2021, PorcentajeJoven2021, PorcentajeJovenDif, PorcentajeVacias2021, PorcentajeSecundarias2021, PorcentajeEspañola2021, PorcentajeProtegidas2021, ProtegidaDif, PrecioAlquilerM2) 
+
+# Equilibrar clases
+prop.table(table(numeric_data$Propiedad)) 
+
+library(ROSE)
+numeric_data <- ovun.sample(Propiedad~., 
+                    data = numeric_data, 
+                    method = "over", 
+                    N = 1000)$data
+
+table(numeric_data$Propiedad)
+# Modelo
+modelo <- glm(Propiedad ~ ., data = numeric_data, family = binomial(link = "logit"))
+
+summary(modelo)
+
+# Matriz de confusión
+prob_pred <- predict(modelo, type = "response")
+clases_pred <- ifelse(prob_pred > 0.5, 1, 0)
+
+confusion_matrix <-table(Real = numeric_data$Propiedad, Predicho = clases_pred)
+confusion_matrix
+
+# Accuracy
+sum(diag(confusion_matrix)) / sum(confusion_matrix)
+
+# Sensibilidad
+confusion_matrix[2, 2] / sum(confusion_matrix[2, ])
+
+# Especificidad
+confusion_matrix[1, 1] / sum(confusion_matrix[1, ])
+
+```
+
+### Evolution of Tenure Regimes in target population plot
+
+```{r, fig.height=8, fig.width=8}
+
+# Calcular las medias para cada régimen en 2011 y 2021
+media_2011 <- propiedad %>%
+  summarise(
+    Property11 = mean(Propiedad11Mun, na.rm = TRUE),
+    Rent11 = mean(Alquiler11Mun, na.rm = TRUE),
+    Other11 = mean(Otro11Mun, na.rm = TRUE))
+
+media_2021 <- propiedad %>%
+  summarise(
+    Property21 = mean(Propiedad21Mun, na.rm = TRUE),
+    Rent21 = mean(Alquiler21Mun, na.rm = TRUE),
+    Other21 = mean(Otro21Mun, na.rm = TRUE)
+  )
+
+# Combinar los datos en un solo dataframe
+medias <- tibble(
+  Year = c(2011, 2021),
+  Property = c(media_2011$Property11, media_2021$Property21),
+  Rent = c(media_2011$Rent11, media_2021$Rent21),
+  Other = c(media_2011$Other11, media_2021$Other21)
+)
+
+# Transformar los datos a formato largo y modificar el orden de "Regime"
+medias_long <- medias %>%
+  pivot_longer(cols = c(Property, Rent, Other),
+               names_to = "Regime",
+               values_to = "Value") %>%
+  mutate(Regime = factor(Regime, levels = c("Property", "Rent", "Other")))  # Modificar el orden de la variable "Regime" para la leyenda
+
+evo <- ggplot(medias_long, aes(x = Year, y = Value, color = Regime, group = Regime)) +
+  geom_line(size = 0.7) +
+  geom_point(size = 2, stroke = 0.5) +  # Ajustar el ancho de la línea de los puntos
+  geom_text(aes(label = paste0(round(Value, 1), "%")), vjust = -0.8, family = "Calibri", size = 4.2, color = "black") +  # Agregar el signo de porcentaje y cambiar el color a negro
+  scale_color_manual(values=c("Property"="#ff7767", "Rent"="#19CF8B", "Other" = "#FFA500")) +  # Cambiar el color de "Otro"
+  labs(title="Evolution of tenure regimes in Spain in 2011-2021 (targeted population)",  # Eliminar el título
+       caption= "Source: Self-elaboration from Census data",  # Eliminar la leyenda
+       x=NULL,
+       y=NULL,
+       color=NULL) +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+  scale_x_continuous(breaks = c(2011, 2021), limits = c(2011, 2021)) +  # Establecer los límites y las marcas del eje x
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, vjust = 6.5, size = 16, family = "Times New Roman", color = "black", face = "bold"),
+    plot.caption = element_text(hjust = -0.1, vjust=-5, family = "Times New Roman", color="#555555", size = 12),  # Cambiar la fuente de la leyenda
+    axis.title = element_blank(),
+    axis.text.x = element_text(color="#333333", size = 12, family = "Times New Roman"),  # Ajustar el tamaño de la fuente del texto del eje x
+    axis.text.y = element_text(color="#333333", size = 12, family = "Times New Roman"),  # Ajustar el tamaño de la fuente del texto del eje y
+    axis.line.x = element_line(size = 0.5, color = "black"),
+    axis.line.y = element_line(size = 0.5, color = "black"),
+legend.text = element_text(margin = margin(t = 0, r = 0.5, b = 0, l = 0), color="#333333", family = "Calibri", size = 12),
+    panel.background = element_rect(fill = "white", color = NA),  # Remove border
+    panel.grid.major = element_line(color = "grey80", size = 0.5),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),  # Remove panel border
+    plot.margin = unit(c(1, 0.5, 1.2, 1), "cm")) +
+  guides(color = guide_legend(override.aes = list(shape = "square", size = 3, linetype = "blank")))
+
+  
+ggsave("evolucion.png", plot = evo, width = 8, height = 5.7, bg = "white")
+
+```
+
+### Scatterplot of Municipalities and Dependent Variable
+
+```{r}
+
+municipios <- municipios |> 
+    mutate(MUN_LITERAL = ifelse(grepl("\\d", MUN_LITERAL), paste(MUN_LITERAL, PROV_LITERAL), MUN_LITERAL))
+
+names = municipios$MUN_LITERAL
+prov = municipios$PROV_LITERAL
+ccaa = municipios$CCAA
+
+library(ggplot2)
+scatterplot <- ggplot(municipios, aes(x = PropiedadDifMun, y = MUN_LITERAL,  color = CCAA)) +
+  geom_point(aes(text = paste(MUN_LITERAL, "PropiedadDifMun:", PropiedadDifMun))) +
+  geom_text(aes(label = MUN_LITERAL), hjust = 1.5, vjust = 0.5, size = 2.5) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank()) +
+  labs(title = "Scatterplot Interactivo de Municipios",
+       x = "PropiedadDifMun",
+       y = "")
+
+# Convertirlo en un gráfico interactivo con ggplotly
+ggplotly(scatterplot, tooltip = "text")
+
+```
+
