@@ -13,4 +13,4 @@ This GitHub repository contains the code used for my Master's Thesis: *Regional 
 
 **-	Shiny App Folder.** Files I used to create the Shiny app to better visualize the plots.
 - app.R. Code for the app.
-- Databases needed (**municipios** & **propiedad**).
+- Databases needed (*municipios* & *propiedad*).
